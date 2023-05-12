@@ -1,0 +1,1760 @@
+#define BUTTON_PIN_BITMASK 0x800000000 // 2^35 in hex
+#define uS_TO_S_FACTOR 1000000  //Conversion factor for micro seconds to seconds
+
+String espSleepString = "";
+uint16_t espSleepInt;
+
+RTC_DATA_ATTR int bootCount = 0;
+
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <WebServer.h>
+#include <EEPROM.h>
+#include <ESPmDNS.h>
+#include <PubSubClient.h>
+#include <ESP32AnalogRead.h>
+const char* host = "ajlon_motor_1";
+String topic_data = "ajlon_feeds/";
+String device = "motor-1";
+
+//ESP32AnalogRead adc;
+
+//SSID and Password to your ESP Access Point
+const char *ssid = "ajlontech_Motor_1";
+const char *password = "12345678";
+//************************** Mqtt Server  ***************************//
+//const char* mqtt_server = "31.220.59.160";
+String mqtt_servers = "";
+String mqtt_ports = "";
+const char* MQTT_server;
+uint16_t MQTT_port;
+//_4C:11:AE:9B:8B:3C
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+ WiFiClient tcp;
+//************************** Libraries Needed To OTA update   ***************//
+#include <Update.h>
+
+
+
+#include "StringSplitter.h"
+#include "mainPage2.h"
+#include "done.h"
+
+//boolean status = false;
+//boolean ledState = true;
+
+String wifi_msg = "";
+String gprs_msg = "";
+const char* STA_ssid = "";
+const char* STA_password = "";
+
+//variables from get request are initalized
+String ssid_str = "";
+String pass_str = "";
+String tcp_ip="";
+String tcp_port="";
+String thershold_value = " ";
+int thershold = 0;
+String sound="ON";
+String simAPN="airtelgprs.com";
+String gprs_ip = " ";
+String gprs_port = " ";
+String gprs_security = " ";
+String web_page_output = "";
+
+const int buzzer = 13;
+//int ledPin = 33;
+const int state = 25;
+String message = "";
+String API_response = "";
+
+String serdata;
+String number[10];
+int totalcontacts=0;
+boolean first=1; 
+boolean m;
+int i;
+#define RXD2 4
+#define TXD2 15
+HardwareSerial gsm(2);
+unsigned long previousMillis = 0;        // will store last time LED was updated
+unsigned long DetectedNumberMillis = 0;
+
+int howmanyContacts=5;
+
+#define MOTORTYPE 1//1 represent Mono phase & 0 represent 3phase
+#define INTERNET_NEEDED 0 //0 represent NO & 1 represent YES
+
+# define Devicestart 27// COM-->NO
+# define Devicestop 14//COM->NC
+# define DeviceLED 32
+# define DeviceON 18// Use pin 12 for single phase
+# define Device 26
+#define  tiltSense 33
+
+int mem_address_value = 1;
+int eeprom_write_flag = 0;
+int eeprom_read_flag = 0;
+int V_ADC_VALUE = 0;
+int voltage_value = 0;
+float C_ADC_Value = 0;
+int mobileRegStart=100;
+//long previousMillis = 0;
+
+bool check_wifi = 0;
+bool interrupt_flag = 0;
+bool web_setup_flag = 0;
+bool gprs_setup_flag = 0;
+const uint8_t interruptPin = 23;
+//const uint8_t memoryPin = 22;
+
+// Set your Static IP address
+IPAddress local_IP(192, 168, 1, 150);
+// Set your Gateway IP address
+IPAddress gateway(192, 168, 1, 1);
+
+IPAddress subnet(255, 255, 0, 0);
+IPAddress primaryDNS(8, 8, 8, 8);   //optional
+IPAddress secondaryDNS(8, 8, 4, 4); //optional
+
+const int leakInput = 34;
+//const int leakInput = 13;
+//#define leakInput 14
+bool motionState=false;
+WebServer server(80); //Server on port 80
+
+/*
+   Login page
+*/
+
+const char* loginIndex =
+  "<form name='loginForm'>"
+  "<table width='20%' bgcolor='A09F9F' align='center'>"
+  "<tr>"
+  "<td colspan=2>"
+  "<center><font size=4><b>ESP32 Login Page</b></font></center>"
+  "<br>"
+  "</td>"
+  "<br>"
+  "<br>"
+  "</tr>"
+  "<td>Username:</td>"
+  "<td><input type='text' size=25 name='userid'><br></td>"
+  "</tr>"
+  "<br>"
+  "<br>"
+  "<tr>"
+  "<td>Password:</td>"
+  "<td><input type='Password' size=25 name='pwd'><br></td>"
+  "<br>"
+  "<br>"
+  "</tr>"
+  "<tr>"
+  "<td><input type='submit' onclick='check(this.form)' value='Login'></td>"
+  "</tr>"
+  "</table>"
+  "</form>"
+  "<script>"
+  "function check(form)"
+  "{"
+  "if(form.userid.value=='admin' && form.pwd.value=='admin')"
+  "{"
+  "window.open('/serverIndex')"
+  "}"
+  "else"
+  "{"
+  " alert('Error Password or Username')/*displays error message*/"
+  "}"
+  "}"
+  "</script>";
+
+
+/*
+   Server Index Page
+*/
+
+const char* serverIndex =
+  "<script src='https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js'></script>"
+  "<form method='POST' action='#' enctype='multipart/form-data' id='upload_form'>"
+  "<input type='file' name='update'>"
+  "<input type='submit' value='Update'>"
+  "</form>"
+  "<div id='prg'>progress: 0%</div>"
+  "<script>"
+  "$('form').submit(function(e){"
+  "e.preventDefault();"
+  "var form = $('#upload_form')[0];"
+  "var data = new FormData(form);"
+  " $.ajax({"
+  "url: '/update',"
+  "type: 'POST',"
+  "data: data,"
+  "contentType: false,"
+  "processData:false,"
+  "xhr: function() {"
+  "var xhr = new window.XMLHttpRequest();"
+  "xhr.upload.addEventListener('progress', function(evt) {"
+  "if (evt.lengthComputable) {"
+  "var per = evt.loaded / evt.total;"
+  "$('#prg').html('progress: ' + Math.round(per*100) + '%');"
+  "}"
+  "}, false);"
+  "return xhr;"
+  "},"
+  "success:function(d, s) {"
+  "console.log('success!')"
+  "},"
+  "error: function (a, b, c) {"
+  "}"
+  "});"
+  "});"
+  "</script>";
+
+void Clear_Eeprom()
+{
+  donePage();
+  Serial.println("Clearing EEPROM");
+  // String clear = "0";
+  for (int i = 0; i <= mem_address_value; ++i)
+  {
+    EEPROM.write(i, 0);
+  }
+  EEPROM.commit();
+  Serial.println("EEPROM Cleared");
+  ESP.restart();
+  Eeprom_read();
+}
+
+void Eeprom_write(String message)
+{
+  if (message.length() > 10)
+  {
+    for (mem_address_value = 0; mem_address_value < message.length(); ++mem_address_value)
+    {
+      Serial.print(message.length());
+      Serial.print("memory address:");
+      Serial.println(mem_address_value);
+      Serial.print("value in memory:");
+      Serial.println(message[mem_address_value]);
+      Serial.print("--------------------------");
+      EEPROM.write(mem_address_value, message[mem_address_value]);
+      Serial.println(message[mem_address_value]);
+      delay(500);
+      delay(10);
+    }
+    EEPROM.write(message.length(), '\0'); //Add termination null character for String Data
+    EEPROM.commit();
+    Serial.println("EEPROM Write process has been completed....\n");
+    eeprom_write_flag = 1;
+    //EEPROM.write(0,eeprom_write_flag);
+    //Serial.println(mem_address_value);
+    Eeprom_read();
+  }
+}
+
+void Eeprom_read()
+{
+  eeprom_read_flag = 0;
+  web_page_output = "";
+  unsigned char k = 'a';
+  int j;
+  char wifiFlag ='0';
+  for (j = 0; k != '\0'; ++j)
+  //for (j = 0; j <500; ++j)
+  {
+    k = EEPROM.read(j);
+    if(j==0)
+      wifiFlag=EEPROM.read(j);
+    web_page_output += char(EEPROM.read(j));
+    //    Serial.print(web_page_output);
+  }
+  if (wifiFlag!='\0')
+  {
+    check_wifi = 1;
+  }
+  eeprom_read_flag = 1;
+  Serial.println(check_wifi);
+  Serial.println(web_page_output);
+}
+
+void mainPage()
+{
+  String page = MAIN_page2;
+  server.send(200, "text/html", page);
+  Serial.print(page);
+  delay(1000);
+}
+
+void donePage()
+{
+  String page = go_back;
+  server.send(200, "text/html", page);
+  Serial.print(page);
+  delay(1000);
+}
+
+void submit()
+{
+  donePage();
+  wifi_msg = "";
+//  Serial.print("wifi_msg:")
+  gprs_msg = "";
+  String check = server.argName(0);
+  Serial.println(check);
+  if (server.args() > 0)
+  {
+    if (check == "ssid")
+    {
+      for (uint8_t i = 0; i < server.args(); i++)
+      {
+        //wifi_msg += " " + server.argName(i) + ": " + server.arg(i) + "\n";
+        wifi_msg += server.arg(i) + "\n";
+      }
+//      Serial.print("wifi_msg:");
+//      Serial.println(wifi_msg);
+//      delay(2000);
+    }
+    if (check == "gprs_tcp")
+    {
+      for (uint8_t i = 0; i < server.args(); i++)
+      {
+        //gprs_msg += " " + server.argName(i) + ": " + server.arg(i) + "\n";
+        gprs_msg += server.arg(i) + "\n";
+      }
+      Serial.print(gprs_msg);
+    }
+    if (wifi_msg.length() > 10)
+    {
+      Serial.print("wifi_msg:");
+      Serial.println(wifi_msg);
+      delay(1000);
+      Eeprom_write(wifi_msg);
+      stringSplit(wifi_msg);
+      Serial.println("Initializing wifi...");
+      normal_mode_config();
+    }
+    if (gprs_msg.length() > 10)
+    {
+      Eeprom_write(gprs_msg);
+      stringSplit(gprs_msg);
+      Serial.println("Initializing gprs...");
+    }
+  }
+  interrupt_flag = 1;
+  delay(3000);
+}
+
+void stringSplit(String web_configuration)
+{
+  StringSplitter *splitter = new StringSplitter(web_configuration, '\n', 14);
+  Serial.println("_____________________");
+  Serial.println(web_configuration);
+  Serial.println("_____________________");
+
+  if ((web_configuration == wifi_msg) || check_wifi)
+  {
+    ssid_str = splitter->getItemAtIndex(0);
+    pass_str = splitter->getItemAtIndex(1);
+    mqtt_servers = splitter->getItemAtIndex(2);
+    mqtt_ports = splitter->getItemAtIndex(3);
+    tcp_ip = splitter->getItemAtIndex(4);
+    tcp_port = splitter->getItemAtIndex(5);
+    thershold_value = splitter->getItemAtIndex(6);
+    espSleepString = splitter->getItemAtIndex(7);
+    sound=splitter->getItemAtIndex(8);
+    simAPN=splitter->getItemAtIndex(9);
+    espSleepInt = espSleepString.toInt();
+    web_setup_flag = 1;
+    Serial.print("Wifi id:");
+    Serial.println(ssid_str);
+    Serial.print("Wifi passwrd:");
+    Serial.println(pass_str);
+    Serial.print("mqtt_servers:");
+    Serial.println(mqtt_servers);
+    Serial.print("mqtt_ports:");
+    Serial.println(mqtt_ports);
+      Serial.print("wifi_msg:");
+      Serial.println(wifi_msg);
+    Serial.print("TCP IP:");
+    Serial.println(tcp_ip);
+    Serial.print("tcp_port:");
+    Serial.println(tcp_port);
+    Serial.print("thershold_value:");
+    Serial.println(thershold_value);
+    Serial.print("time to sleep:");
+    Serial.println(espSleepString);
+    Serial.print(":         :");
+    Serial.println(espSleepInt);
+    Serial.print("Sound:");
+    Serial.println(sound);
+        Serial.print("simAPN:");
+    Serial.println(simAPN);
+
+    Serial.println("_____________________");
+  }
+  if ((web_configuration == gprs_msg) || !check_wifi)
+  {
+    gprs_ip = splitter->getItemAtIndex(0);
+    gprs_port = splitter->getItemAtIndex(1);
+    gprs_security = splitter->getItemAtIndex(2);
+    gprs_setup_flag = 1;
+    //    Serial.println(gprs_ip);
+    //    Serial.println(gprs_port);
+  }
+}
+void memory_mode_config()
+{
+  Serial.println("Device configuration from memory...");
+  // Serial.println(char(EEPROM.read(0)));
+  Eeprom_read();
+  if (eeprom_read_flag == 1)
+  {
+    Serial.println("Read settings from EEPROM");
+
+    stringSplit(web_page_output);
+    Serial.println("finished splitting");
+  }
+  else
+  {
+    Serial.println("Failed to read form EEPROM...");
+    exit(0);
+  }
+  if (check_wifi)
+  {
+    normal_mode_config();
+  }
+  else
+  {
+    Serial.println("Initialize gprs");
+  }
+}
+int wificount=0;
+void normal_mode_config()
+{
+  STA_ssid = ssid_str.c_str();
+  STA_password = pass_str.c_str();
+  Serial.println(STA_ssid);
+  Serial.println(STA_password);
+  //    WiFi.mode(WIFI_STA);
+  //WiFi.begin(STA_ssid, STA_password);
+
+      // Configures static IP address
+  if (!WiFi.config(local_IP, gateway, subnet, primaryDNS, secondaryDNS)) {
+    Serial.println("STA Failed to configure");
+  }
+
+        // Connect to Wi-Fi network with SSID and password
+  Serial.print("Connecting to ");
+  Serial.println(STA_ssid);
+  WiFi.begin(STA_ssid, STA_password);
+  
+  unsigned long startMillis = millis();
+  int i = 0;
+  while (WiFi.status() != WL_CONNECTED)
+  { // Wait for the Wi-Fi to connect
+    delay(1000);
+    Serial.print(++i);
+    Serial.print(' ');
+    if (millis() - startMillis >= 10000)
+    {
+      Serial.println("");
+      Serial.print("Timeout Occured... \nDiscarding to Connect to ");
+      wificount++;
+//      if (digitalRead(interruptPin) == LOW)
+//      {
+//        interrupt_service();
+//        //    delay(5000);
+//      }
+      Serial.println(STA_ssid);
+      Serial.println("");
+      if(wificount>3)break;
+      normal_mode_config();
+    }
+    if(i>6)break;
+  }
+
+  if(WiFi.status() == WL_CONNECTED)
+  {
+      Serial.println("\n\nRunning Station mode");
+      Serial.println("WiFi Connection established!");
+        // WiFi.mode(WIFI_STA);
+      // WiFi.mode(WIFI_STA);
+  Serial.println("\n\nRunning Station mode");
+  Serial.println("WiFi Connection established!");
+  Serial.print("IP address:\t");
+  Serial.println(WiFi.localIP()); // Send the IP address of the ESP8266 to the computer
+  }
+  else
+  { 
+    Serial.println("Running ISR: Access Point...");
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.softAP(ssid, password); //Start HOTspot removing password will disable security
+  
+    IPAddress myIP = WiFi.softAPIP(); //Get IP address
+    Serial.println(ssid);
+    Serial.print("HotSpt IP: ");
+    Serial.print(myIP);
+  }
+
+  //Serial.prindtln("EEPROM reads the default input values");
+  Serial.println("---------------------------MQTT Setup------------------------------------");
+
+  delay(100);
+  MQTT_server = mqtt_servers.c_str();
+  Serial.print("mqtt server ip:");
+  Serial.println(MQTT_server);
+  //  delay(100);
+  MQTT_port = mqtt_ports.toInt();
+  Serial.print("mqtt port:");
+  Serial.println(MQTT_port);
+  //  //  MQTT_server,MQTT_port
+  delay(1000);
+  client.setServer(MQTT_server, MQTT_port);
+  delay(100);
+  //     client.setServer("31.220.59.160", 1883);
+  client.setCallback(callback);
+  topic_data+=WiFi.macAddress();
+  Serial.println("---------------------------TCP Setup------------------------------------");
+  char tcpIp[50];
+tcp_ip.toCharArray(tcpIp,50);
+Serial.print("TCP IP:");
+Serial.println(tcpIp);
+Serial.print("TCP port:");
+Serial.println(tcp_port.toInt());
+
+
+ if (!tcp.connect(tcpIp, tcp_port.toInt())) {
+        Serial.println("Connection to host failed");
+        delay(1000);
+        return;
+    }
+
+  digitalWrite(state, HIGH);
+  Serial.println("TCP is initalized");
+  Serial.println("---------------------------ESP sleep Setup------------------------------------");
+
+//  //Set timer to 5 seconds
+//  if (espSleepInt != 0) {
+//    esp_sleep_enable_timer_wakeup(espSleepInt * uS_TO_S_FACTOR);
+//    Serial.println("Setup ESP32 to sleep for every " + String(espSleepInt) +
+//                   " Seconds");
+//    esp_sleep_enable_ext0_wakeup(GPIO_NUM_35, 1); //1 = High, 0 = Low
+//  }
+
+}
+
+void interrupt_service()
+{
+  for (int i = 0; i <= 512; i++) {
+    Serial.print(i);
+    Serial.print("-");
+    Serial.print(EEPROM.read(i));
+    EEPROM.write(i, 0);
+    EEPROM.commit();
+    Serial.print("-");
+    Serial.print("-");
+    Serial.print(EEPROM.read(i));
+    Serial.println();
+  }
+
+
+  //  delay(60000);
+}
+
+String  ReadStrEEPROM(int beginaddress)
+{
+  byte counter = 0;
+  char rChar;
+  String retString = "";
+  while (1)
+  {
+    rChar = EEPROM.read(beginaddress + counter);
+    counter++;
+    if (rChar == 0) break;
+    if (counter > 100) break;
+    retString.concat(rChar);
+  }
+  return retString;
+}
+
+void Stop()
+{
+      Serial.print("\n");
+      Serial.print("Device-flag:");
+      Serial.println(m);
+      Serial.print("Device-state:");
+      Serial.println(i);
+
+      if(m==0 && i)
+      {
+      Serial.print("Device-OFF:");
+      digitalWrite(DeviceLED,LOW);
+      digitalWrite(Device,LOW);
+      digitalWrite(DeviceON, LOW);
+      digitalWrite(Devicestart,LOW);
+      digitalWrite(Devicestop,HIGH);
+       delay(500);
+      }
+}
+
+void offRelay()
+{
+      Serial.print("\n");
+      Serial.print("Device-flag:");
+      Serial.println(m);
+      Serial.print("Device-state:");
+      Serial.println(i);
+
+      if(m==0 && i)
+      {
+      Serial.print("Device-OFF:");
+      digitalWrite(DeviceLED,LOW);
+      digitalWrite(Device,LOW);
+      digitalWrite(DeviceON, LOW);
+      digitalWrite(Devicestop,HIGH);
+      digitalWrite(Devicestart,LOW);
+      delay(500);
+      }
+}
+//For Starter Type Pumps
+void Start()
+{       
+        Serial.print("\n");
+        Serial.print("Device-flag:");
+        Serial.println(m);
+        Serial.print("Device-state:");
+        Serial.println(i);
+
+        if(m==1 && !i)
+        {
+        Serial.print("Device-ON:");
+        digitalWrite(DeviceLED,HIGH);
+        digitalWrite(Device,HIGH);
+        digitalWrite(DeviceON, HIGH);
+        digitalWrite(Devicestart,LOW);
+        digitalWrite(Devicestop,HIGH);
+        delay(1500);
+        }
+}
+
+void onRelay()
+{       
+        Serial.print("\n");
+        Serial.print("Device-flag:");
+        Serial.println(m);
+        Serial.print("Device-state:");
+        Serial.println(i);
+
+        if(m==1 && !i)
+        {
+        Serial.print("Device-ON:");
+        digitalWrite(DeviceLED,HIGH);
+        digitalWrite(Device,HIGH);
+        digitalWrite(Devicestart,HIGH);
+        digitalWrite(Devicestop,LOW);
+        delay(500);
+        }
+}
+
+ void setup()
+{
+  //                                                         setting of power supply and state
+  pinMode(state, OUTPUT);
+  pinMode(tiltSense, INPUT);
+  digitalWrite(state, LOW);   // turn the LED on (HIGH is the voltage level)
+
+  delay(1000);
+
+//  adc.attach(33);
+  Serial.begin(9600);
+  //Increment boot number and print it every reboot
+  ++bootCount;
+  Serial.println("Boot number: " + String(bootCount));
+
+  //Print the wakeup reason for ESP32
+  print_wakeup_reason();
+
+
+  EEPROM.begin(512);
+  Serial.println("Running ISR: Access Point...");
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.softAP(ssid, password); //Start HOTspot removing password will disable security
+
+  IPAddress myIP = WiFi.softAPIP(); //Get IP address
+  Serial.println(ssid);
+  Serial.print("HotSpt IP: ");
+  Serial.print(myIP);
+  delay(100);
+  /*use mdns for host name resolution*/
+  if (!MDNS.begin(host)) { //http://esp32.local
+    Serial.println("Error setting up MDNS responder!");
+    while (1) {
+      delay(1000);
+    }
+  }
+  Serial.println("mDNS responder started");
+  /*return index page which is stored in serverIndex */
+  server.on("/status", successMessage);              //Routine to handel main page
+  server.on("/", mainPage);              //Routine to handel main page
+  server.on("/submit", submit);          //Routine to handle after submit button
+  server.on("/clear_mem", Clear_Eeprom); //Routine to clear the Eeprom
+
+  /*return index page which is stored in serverIndex */
+  server.on("/login", HTTP_GET, []() {
+    server.sendHeader("Connection", "close");
+    server.send(200, "text/html", loginIndex);
+  });
+  server.on("/serverIndex", HTTP_GET, []() {
+    server.sendHeader("Connection", "close");
+    server.send(200, "text/html", serverIndex);
+  });
+  /*handling uploading firmware file */
+  server.on("/update", HTTP_POST, []() {
+    server.sendHeader("Connection", "close");
+    server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
+    ESP.restart();
+  }, []() {
+    HTTPUpload& upload = server.upload();
+    if (upload.status == UPLOAD_FILE_START) {
+      Serial.printf("Update: %s\n", upload.filename.c_str());
+      if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { //start with max available size
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+      /* flashing firmware to ESP*/
+      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_END) {
+      if (Update.end(true)) { //true to set the size to the current progress
+        Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize);
+      } else {
+        Update.printError(Serial);
+      }
+    }
+  });
+
+  server.begin();                        //Start server
+
+
+  delay(100);
+  Serial.println("HTTP server started");
+
+  Serial.println("Setup is running...5sec for interrupt");
+  //  digitalWrite(interruptPin,LOW);
+  //  digitalWrite(memoryPin,LOW);
+  pinMode(interruptPin, OUTPUT);
+  //pinMode(memoryPin, INPUT_PULLUP);
+  pinMode(13,INPUT_PULLUP);
+  pinMode(buzzer, OUTPUT);
+  digitalWrite(buzzer, LOW);
+  //pinMode(ledPin, OUTPUT);
+  //digitalWrite(ledPin, LOW);
+  delay(5000);
+  Serial.printf("interruptPin state:%d", digitalRead(interruptPin));
+  Serial.println();
+//  if (digitalRead(interruptPin) == LOW)
+//  {
+//    interrupt_service();
+//  }
+  Serial.println("Setup is running...5sec for memory interrupt");
+
+  Serial.println("in mem");
+
+  memory_mode_config();
+
+      if (espSleepInt >=0) {
+    esp_sleep_enable_timer_wakeup(espSleepInt * uS_TO_S_FACTOR);
+    Serial.println("Setup ESP32 to sleep for every " + String(espSleepInt) +
+                   " Seconds");
+    esp_sleep_enable_ext0_wakeup(GPIO_NUM_35, 1); //1 = High, 0 = Low
+  }
+
+  Serial.println("exit from statement interupt and memory");
+
+  Serial.println("----------------------------Initalizing TDS Sensor--------------------------------------");
+
+  Serial.println("---------------------------Setting Thershold TDS---------------------------------------");
+
+  
+  EEPROM.begin(512);
+  pinMode(DeviceON,OUTPUT);
+  pinMode(Device,OUTPUT);
+  pinMode(Devicestart,OUTPUT);
+  pinMode(Devicestop,OUTPUT);
+  pinMode(DeviceLED,OUTPUT);
+  digitalWrite(DeviceLED, LOW);
+
+  
+  server.on("/start", Start);
+  server.on("/stop", Stop);
+  gsm.begin(9600, SERIAL_8N1, RXD2, TXD2);//RXD, TXD
+   
+  //if(INTERNET_NEEDED)
+  {
+    server.on("/clear_mem", Clear_Eeprom); //Routine to clear the Eeprom
+   
+    Serial.println("Started");
+    //delay(25000);//change delay to 10000
+    delay(2000);//change delay to 10000
+    gsm.flush();
+    delay(1000);
+    gsm.println("AT");
+    delay(200);
+    ShowSerialData();
+    delay(100);
+    Serial.println("Reading contacts");
+    //ExtractPhno();
+    delay(100);
+    gsm.println("AT+CMGD=1,4");//delete all sms
+    delay(100);
+    ShowSerialData(); 
+    gsm.println("AT+CMGF=1"); // set SMS mode to text
+    delay(100);
+    ShowSerialData();
+    gsm.println("AT+CNMI=2,2,0,0,0");//set module to send SMS data to serial out upon receipt 
+    delay(100);
+    ShowSerialData();
+    gsm.println("AT+CMGR=2"); // 
+    delay(100);
+    ShowSerialData();
+    gsm.println("AT+CLIP=1"); // To see the incomming call Number
+    delay(100);
+    ShowSerialData();
+    for(int kml = 1; kml<6; kml++)
+      Serial.println(ReadStrEEPROM(kml*20));
+      
+    Serial.println("exit setup");
+  
+    String comm="AT+CSTT="+simAPN;
+    Serial.println(comm);
+  }
+}
+
+long lastMsg = 0;
+char msg[50];
+int value = 0;
+int loopCount=0;
+void loop()
+{
+  loopCount++;
+  if(loopCount>90000)loopCount=0;
+  server.handleClient(); //Handle client requests
+  //  if (!client.connected()) {/
+  //    reconnect();
+  //  }
+  int i;
+//  Serial.println("Wifi Checked:");
+//  Serial.println(check_wifi);
+  if (check_wifi == 1)
+  {
+    //digitalWrite(ledPin, HIGH);
+//      if (!client.connected()) {
+//    reconnect();
+  }
+//  client.loop();
+//  client.publish("ajlon_feeds/30:C6:F7:29:1F:90", "publish");
+
+  client.loop();
+  thershold = thershold_value.toInt();
+  if (thershold == 0) {
+    thershold = 1;
+  }
+//  Serial.print("Thershold Leakage:");
+//  Serial.println(thershold);
+//  Serial.print("Sound:");
+//  Serial.println(sound);
+  
+  int time_gap=0;
+  int digitalReadVal = digitalRead(13);
+  API_response = "{\"status\":";
+  
+//  Serial.print("digitalRead(13):");
+//  Serial.println(digitalRead(13));
+  
+  if (digitalRead(13) < thershold) 
+  {
+    API_response += "ALERT";
+    
+    if(sound=="ON"){
+//      Serial.println("buzzer is on");
+//      digitalWrite(buzzer, HIGH);
+//      digitalWrite(35, HIGH);
+    }
+    else {
+//      Serial.println(" buzzer is off");
+//      digitalWrite(buzzer, LOW);
+      }
+  }
+  else {
+    API_response += "NORMAL";
+    digitalWrite(buzzer, LOW);
+//    digitalWrite(35, LOW);
+  }
+  
+  API_response +=",\"data\":";
+  API_response +=digitalRead(13);
+  API_response += ",\"thershold\":";
+  API_response += thershold;
+  API_response += ",\"time_gap\":";
+  API_response += espSleepInt;
+  API_response += "sec}";
+
+//
+//
+//Serial.print("Mqtt topic:");
+//Serial.println(topic_data);
+//  Serial.println(WiFi.macAddress());
+//  Serial.print("API Response = ");
+//  Serial.println(API_response);
+//  char api[API_response.length()];
+//  API_response.toCharArray(api, API_response.length() + 1);
+//  Serial.println(api);
+////  Serial.println(topic_data);
+//  Serial.println(API_response.length());
+//    Serial.println("Data in published");
+////  delay(1000);
+//  client.publish(topic_data.c_str(), api);
+////  delay(1000);
+//    tcp.print(API_response);
+//    Serial.println("Response is send via tcp");
+// 
+//  //                ("_________________Sending data to tcp______________________ ");
+//  Serial.println("------------------------------------------------------------------");
+//  //  }
+//
+//
+//  API_response = "";
+//  if (espSleepInt == 0 || digitalRead(13) < thershold ) {
+//    Serial.println("esp is in loop");   
+//    }
+//else{
+//  
+//   Serial.println("esp start to sleep");
+//   esp_deep_sleep_start();
+//  }
+//  Serial.println(digitalRead(tiltSense));
+    if(!digitalRead(tiltSense))
+    {
+      if(motionState){ digitalWrite(buzzer, HIGH);SendSms("Theft Alert",howmanyContacts); Serial.println("Theft Alert"); }
+      }
+  if(first){
+  SendSms("System Ready",1);
+  Serial.println("....................System Ready....................");
+  first=0;
+  }
+  if(gsm.available())
+  {
+    String msg="";
+    char inchar=gsm.read();
+    if(inchar == 'R')
+    {
+      Serial.println("inside RING");
+      inchar=gsm.read();
+      if(inchar == 'I')
+      {
+//        gsm.println("AT+CLIP=1");  
+//        delay(100);
+//        ShowSerialData();
+//        Serial.println(serdata);
+        String val = gsm.readString();
+        Serial.println(val);
+        Serial.print("IndexOf : ");
+        Serial.println(val.indexOf("+CLIP: "));
+        Serial.print("SubString : ");
+        String Detected_No = val.substring(val.indexOf("\"+")+4, val.indexOf("\"+")+14);
+        Serial.println(Detected_No);
+        Serial.println(ReadStrEEPROM(mobileRegStart+20));
+        Serial.println(ReadStrEEPROM(mobileRegStart+40));
+        Serial.println(ReadStrEEPROM(mobileRegStart+60));
+//        if(((Detected_No == number[1]) || (Detected_No == number[2]) || (Detected_No == number[3])) && (millis()-DetectedNumberMillis>=60000))
+        if(((String(Detected_No) == ReadStrEEPROM(mobileRegStart+20))) && (millis()-DetectedNumberMillis>=30000))
+        {
+          Serial.println("Number Detected");
+          
+          gsm.println("ATH");  
+          delay(100);
+          ShowSerialData();
+          
+          m=!m;
+          Run();
+          if(m){ SendSms("Motor-B1, Charge-B2",howmanyContacts); Serial.println("Motor-B1, Charge-B2"); }
+          else{ SendSms("Motor-B2, Charge-B1",howmanyContacts); Serial.println("Motor-B2, Charge-B1"); }
+          DetectedNumberMillis = millis();
+        }
+        if(((String(Detected_No) == ReadStrEEPROM(mobileRegStart+40))) && (millis()-DetectedNumberMillis>=30000))
+        {
+          Serial.println("Number Detected");
+          
+          gsm.println("ATH");  
+          delay(100);
+          ShowSerialData();
+          
+          m=!m;
+          Run();
+          if(m){ SendSms("Motor-B1, Charge-B2",howmanyContacts); Serial.println("Motor-B1, Charge-B2"); }
+          else{ SendSms("Motor-B2, Charge-B1",howmanyContacts); Serial.println("Motor-B2, Charge-B1"); }
+          DetectedNumberMillis = millis();
+        }
+        if(((String(Detected_No) == ReadStrEEPROM(mobileRegStart+60))) && (millis()-DetectedNumberMillis>=30000))
+        {
+          Serial.println("Number Detected");
+          
+          gsm.println("ATH");  
+          delay(100);
+          ShowSerialData();
+          
+          m=!m;
+          Run();
+          if(m){ SendSms("Motor-B1, Charge-B2",howmanyContacts); Serial.println("Motor-B1, Charge-B2"); }
+          else{ SendSms("Motor-B2, Charge-B1",howmanyContacts); Serial.println("Motor-B2, Charge-B1"); }
+          DetectedNumberMillis = millis();
+          
+        }
+      }
+    }
+    if(inchar == 'M')
+    {
+        delay(5);
+        inchar=gsm.read();
+        if(inchar == 'R')
+        {
+          delay(5);
+          msg=gsm.readString();
+          Serial.println(msg);
+          msg.trim();
+          delay(5);
+          String mobno= msg.substring(0,10);
+          Serial.println(mobno);
+         delay(5);
+          int indexno= msg.substring(11,12).toInt();
+          Serial.println(indexno);
+          Serial.println("Before Register");
+          //ExtractPhno();
+          //MobileRegister(indexno, mobno, indexno);
+          Serial.println("After Register");
+          //ExtractPhno();
+          Serial.println("**********************************************");
+          Serial.println(indexno);
+          Serial.println("**********************************************");
+          WriteStrEEPROM(mobileRegStart+indexno*20, String(mobno));
+          delay(10);
+          String regNO=ReadStrEEPROM(mobileRegStart+indexno*20);
+          Serial.println("**********************************************");
+          Serial.println(regNO);
+          Serial.println("**********************************************");
+          String sendsms ="Mobile no :";
+          sendsms +=mobno;
+          sendsms +=" Registered";
+          SendSms(sendsms,howmanyContacts);
+          Serial.println(sendsms);
+        }
+    }
+    if(inchar=='#')
+    {
+      msg =gsm.readStringUntil('\n');
+      Serial.println(msg);
+      msg.trim();
+      if(strcmp("P123456OUT1=ON#", string2char(msg)) == 0)
+      {
+        m=1;
+       Serial.print("Device flag inside:");
+       Serial.print(m);
+       Run();
+       
+       SendSms("Motor-B1, Charge-B2",howmanyContacts);
+        Serial.println("OUT1=ON");
+        if(INTERNET_NEEDED) Send2WebServer("Motor-B1, Charge-B2");
+      }
+      else if(strcmp("P123456OUT1=OFF#", string2char(msg)) == 0)
+      {
+       m=0;
+       Serial.print("Device flag inside:");
+       Serial.print(m);
+       Run();
+       
+        SendSms("Motor-B2, Charge-B1",howmanyContacts);
+        Serial.println("OUT1=OFF");
+        if(INTERNET_NEEDED) Send2WebServer("Motor-B2, Charge-B1");
+      }
+      else if(strcmp("del#", string2char(msg)) == 0)
+      {
+        Serial.println("Contacts Deleting is in progress");
+        delcontacts(howmanyContacts);
+        Serial.println("Contacts were Deleted successfully");
+      }
+     else if(strcmp("theft-activate#", string2char(msg)) == 0)
+      {
+        Serial.println("Motion Alert ");
+        motionState=true;
+        Serial.println("Motion Alert Activated");
+      }
+           else if(strcmp("theft-deactivate#", string2char(msg)) == 0)
+      {
+        Serial.println("Motion Alert ");
+        motionState=false;
+        digitalWrite(buzzer, LOW);
+        Serial.println("Motion Alert deactivated");
+      }
+      if(msg.substring(0, 4) == "USSD")
+      {
+        Serial.println("USSD Code Running");
+        Serial.println(msg.substring(4));
+        gsm.print("AT+CUSD=1,\"");
+        gsm.print(msg.substring(4));
+        gsm.println("\"");
+//        delay(1000);
+        previousMillis = millis();
+        ShowSerialussd();
+        //AT+CUSD=1, "*121*2#"
+      }
+
+    }
+
+  }
+ }
+void delcontacts(int n)
+{
+  /*
+  for(int i=1;i<=5;i++)
+  {
+    gsm.print("AT+CPBS=\"SM\"\r");
+    delay(100);
+    ShowSerialData();
+    gsm.print("AT+CPBW=");
+    gsm.println(i); //command to del the contact
+    delay(100);
+    ShowSerialData();
+  }*/
+    Serial.println("Clearing EEPROM");
+  // String clear = "0";
+  for (int i = 0; i <=500; ++i)
+  {
+    EEPROM.write(i, 0);
+  }
+  EEPROM.commit();
+  Serial.println("EEPROM Cleared");
+  Eeprom_read();
+}
+
+  void MobileRegister(int indexNo, String MobileNo, int Name)
+ {
+   totalcontacts=0;
+   gsm.print("AT+CPBS=\"SM\"\r");
+   delay(100);
+   ShowSerialData();
+   gsm.print("AT+CPBW=");
+   gsm.println(indexNo); //command to del the contact
+   delay(100);
+   ShowSerialData();
+   String st="AT+CPBW=";
+   st+=indexNo;
+   st+=",\"+91";
+   st+=MobileNo;
+   st+="\",129,\"";
+   st+=Name;
+   st+="\"\r";
+   Serial.println(st);
+   gsm.println(st);// to create a new contact
+   delay(100);
+   ShowSerialData();
+ }
+
+void ExtractPhno()
+{
+  gsm.println("AT+CPBS=\"SM\"");
+  delay(100);
+  ShowSerialData();
+  for(int i=1;i<=2;i++)
+  {
+  gsm.print("AT+CPBR=");
+  gsm.println(i);
+  delay(100);
+  ShowSerialData();
+  //Serial.println(serdata.substring(10,16));
+    for(int l = 0; l<16; l++)
+    {
+      if(serdata.substring(l,l+6) == "+CPBR:")
+      {
+        number[i]=serdata.substring(l+10,l+23);
+        Serial.print(i);
+        Serial.print(":");
+        Serial.println(number[i]);
+        totalcontacts++;
+      }
+    }
+  
+  }
+  Serial.print("totalcontacts : ");
+  Serial.println(totalcontacts);
+}
+
+void DialVoiceCall(String msg,int num)
+{
+  int n=num;
+  String mobno="";
+  Serial.println("inside send");
+  for(int i=1;i<=n;i++)
+  {
+//    mobno=number[i];
+    Serial.println("**********************************************");
+    mobno = ReadStrEEPROM(mobileRegStart+20*i);
+    //mobno="+919962673502";
+    Serial.println(mobno);
+    Serial.println("**********************************************");
+    gsm.println("AT");
+    gsm.println("ATD" +mobno+";");//dial the number
+    ShowSerialData();  
+    delay(30000);
+  }
+//  mySerial.println("ATD +919791040228;");//dial the number
+//  delay(100);
+//  mySerial.println();
+}
+/*
+void Send2WebServer(String val)
+{
+    Serial.println("**********************************************");
+      Serial.println("Inside GSM Internet");
+    Serial.println("**********************************************");
+    
+   if (gsm.available())
+    Serial.write(gsm.read());
+ 
+  gsm.println("AT");
+  delay(300);
+ 
+  gsm.println("AT+CPIN?");
+  delay(300);
+ 
+  gsm.println("AT+CREG?");
+  delay(300);
+ 
+  gsm.println("AT+CGATT?");
+  delay(300);
+ 
+  gsm.println("AT+CIPSHUT");
+  delay(300);
+ 
+  gsm.println("AT+CIPSTATUS");
+  delay(300);
+  gsm.println("AT+CIPMUX=0");
+  delay(300);
+ 
+  ShowSerialData();
+  //String comm="AT+CSTT="+"\""+ simAPN +"\"";
+  //Serial.print(comm);
+  gsm.println("AT+CSTT=\"airtelgprs.com\"");//start task and setting the APN,
+  //gsm.println(comm);//start task and setting the APN
+  delay(300);
+ 
+  ShowSerialData();
+ 
+  gsm.println("AT+CIICR");//bring up wireless connection
+  delay(500);
+ 
+  ShowSerialData();
+ 
+  gsm.println("AT+CIFSR");//get local IP adress
+  delay(500);
+ 
+  ShowSerialData();
+ 
+  gsm.println("AT+CIPSPRT=0");
+  delay(500);
+  //ShowSerialData();
+  Serial.println("Here inside");
+   //gprsSerial.println("AT+CIPSTART=\"TCP\",\"api.thingspeak.com\",\"80\"");
+  gsm.println("AT+CIPSTART=\"TCP\",\"31.220.59.160\",\"1885\"");//start up the connection
+  delay(2000);
+ 
+  ShowSerialData();
+ 
+  gsm.println("AT+CIPSEND");//begin send data to remote server
+  delay(1000);
+  ShowSerialData();
+  
+  //String str="GET https://api.thingspeak.com/update?api_key=O13AOCHYYNU2LQ19&field1=" + String(t) +"&field2="+String(h);
+  Serial.println(val);
+  gsm.println(val);//begin send data to remote server
+  
+  delay(1000);
+  ShowSerialData();
+ 
+  gsm.println((char)26);//sending
+  delay(2000);//waitting for reply, important! the time is base on the condition of internet 
+  gsm.println();
+ 
+  ShowSerialData();
+  gsm.println("AT+CIPSHUT");//close the connection
+  delay(100);
+  ShowSerialData();
+}
+*/
+void Send2WebServer(String val)
+{
+    Serial.println("**********************************************");
+      Serial.println("Inside GSM Internet");
+    Serial.println("**********************************************");
+    
+   if (gsm.available())
+    Serial.write(gsm.read());
+ 
+  gsm.println("AT");
+  delay(1000);
+ 
+  gsm.println("AT+CPIN?");
+  delay(1000);
+ 
+  gsm.println("AT+CREG?");
+  delay(1000);
+ 
+  gsm.println("AT+CGATT?");
+  delay(1000);
+ 
+  gsm.println("AT+CIPSHUT");
+  delay(1000);
+ 
+  gsm.println("AT+CIPSTATUS");
+  delay(2000);
+  gsm.println("AT+CIPMUX=0");
+  delay(2000);
+ 
+  ShowSerialData();
+  //String comm="AT+CSTT="+"\""+ simAPN +"\"";
+  //Serial.print(comm);
+  String apnIn="AT+CSTT="+simAPN;
+  //gsm.println("AT+CSTT=\"airtelgprs.com\"");//start task and setting the APN,
+  gsm.println(apnIn);
+  //gsm.println(comm);//start task and setting the APN
+  delay(1000);
+ 
+  ShowSerialData();
+ 
+  gsm.println("AT+CIICR");//bring up wireless connection
+  delay(3000);
+ 
+  ShowSerialData();
+ 
+  gsm.println("AT+CIFSR");//get local IP adress
+  delay(2000);
+ 
+  ShowSerialData();
+ 
+  gsm.println("AT+CIPSPRT=0");
+  delay(3000);
+  //ShowSerialData();
+  Serial.println("Here inside");
+   //gprsSerial.println("AT+CIPSTART=\"TCP\",\"api.thingspeak.com\",\"80\"");
+  gsm.println("AT+CIPSTART=\"TCP\",\"31.220.59.160\",\"1885\"");//start up the connection
+  delay(6000);
+ 
+  ShowSerialData();
+ 
+  gsm.println("AT+CIPSEND");//begin send data to remote server
+  delay(4000);
+  ShowSerialData();
+  
+  //String str="GET https://api.thingspeak.com/update?api_key=O13AOCHYYNU2LQ19&field1=" + String(t) +"&field2="+String(h);
+  Serial.println(val);
+  gsm.println(val);//begin send data to remote server
+  
+  delay(4000);
+  ShowSerialData();
+ 
+  gsm.println((char)26);//sending
+  delay(5000);//waitting for reply, important! the time is base on the condition of internet 
+  gsm.println();
+ 
+  ShowSerialData();
+  gsm.println("AT+CIPSHUT");//close the connection
+  delay(100);
+  ShowSerialData();
+}
+
+//void ShowSerialData()
+//{
+//  while(gsm.available()!=0)
+//  Serial.write(gsm.read());
+//  delay(5000); 
+//  
+//}
+
+//void Send2WebServer(String val)
+//{
+//  Serial.println("**********************************************");
+//      Serial.println("Inside GSM Internet");
+//    Serial.println("**********************************************");
+//  gsm.println("AT+CGATT?");
+//  delay(1000);
+// 
+//  ShowSerialData();
+// 
+//  gsm.println("AT+CSTT=\"airtelgprs.com\"");//start task and setting the APN,
+//  delay(1000);
+// 
+//  ShowSerialData();
+// 
+//  gsm.println("AT+CIICR");//bring up wireless connection
+//  delay(3000);
+// 
+//  ShowSerialData();
+// 
+//  gsm.println("AT+CIFSR");//get local IP adress
+//  delay(2000);
+// 
+//  ShowSerialData();
+// 
+//  gsm.println("AT+CIPSPRT=0");
+//  delay(3000);
+// 
+//  ShowSerialData();
+// 
+//  gsm.println("AT+CIPSTART=\"tcp\",\"http://31.220.59.160:1880/\",\"1885\"");//start up the connection
+//  delay(2000);
+// 
+//  ShowSerialData();
+//  
+// 
+//  gsm.println("AT+CIPSEND");//begin send data to remote server
+//  delay(4000);
+//  ShowSerialData();
+//  gsm.print(val);
+//
+//  /*
+//  String humidity = "1031";//these 4 line code are imitate the real sensor data, because the demo did't add other sensor, so using 4 string variable to replace.
+//  String moisture = "1242";//you can replace these four variable to the real sensor data in your project
+//  String temperature = "30";//
+//  String barometer = "60.56";//
+//  gsm.print("{\"method\": \"put\",\"resource\": \"/https://api.thingspeak.com/channels/27067/feed.json?key=JPBML8FLSX8627E0/\",\"params\"");//here is the feed you apply from pachube
+//  delay(500);
+//  ShowSerialData();
+//  gsm.print(": {},\"headers\": {\"JPBML8FLSX8627E0\":");//in here, you should replace your pachubeapikey
+//  delay(500);
+//  ShowSerialData();
+//  gsm.print(" \"JM5SSSFFAE9SXJ52");//pachubeapikey
+//  delay(500);
+//  ShowSerialData();
+//  gsm.print("TXQXIIU00KKHZCMJ");//pachubeapikey
+//  delay(500);
+//  ShowSerialData();
+//  gsm.print("IDWB90CONVTGX9HB\"},\"body\":");
+//  delay(500);
+//  ShowSerialData();
+//  gsm.print(" {\"version\": \"1.0.0\",\"datastreams\": ");
+//  delay(500);
+//  ShowSerialData();
+//  gsm.println("[{\"id\": \"01\",\"current_value\": \"" + barometer + "\"},");
+//  delay(500);
+//  ShowSerialData();
+//  gsm.println("{\"id\": \"02\",\"current_value\": \"" + humidity + "\"},");
+//  delay(500);
+//  ShowSerialData();
+//  gsm.println("{\"id\": \"03\",\"current_value\": \"" + moisture + "\"},");
+//  delay(500);
+//  ShowSerialData();
+//  gsm.println("{\"id\": \"04\",\"current_value\": \"" + temperature + "\"}]},\"token\": \"lee\"}");
+// 
+// 
+//  delay(500);
+//  ShowSerialData();
+// 
+//  gsm.println((char)26);//sending
+//  delay(5000);//waitting for reply, important! the time is base on the condition of internet 
+//  gsm.println();
+// 
+//  ShowSerialData();*/
+// 
+//  gsm.println("AT+CIPCLOSE");//close the connection
+//  delay(100);
+//  ShowSerialData();
+//}
+
+void SendSms(String msg,int num)
+{ 
+  int n=num;
+ /* if(num == "one")
+  {
+    n=1;
+  }
+  if(num == "all")
+  {
+    n=totalcontacts;
+  }*/
+  String mobno="";
+  Serial.println("inside send");
+  for(int i=1;i<=n;i++)
+  {
+//    mobno=number[i];
+    Serial.println("**********************************************");
+    mobno = ReadStrEEPROM(mobileRegStart+20*i);
+    //mobno="+919962673502";
+    Serial.println(mobno);
+    Serial.println("**********************************************");
+    gsm.println("AT");
+    delay(500);
+    ShowSerialData();
+    gsm.print("AT+CMGS=\"");
+    gsm.print(mobno);
+    gsm.println("\"");
+    delay(1000);
+    ShowSerialData();
+    delay(100);
+    gsm.println(msg);
+    delay(1000);
+    gsm.write(0x1A);
+    gsm.write(0x0D);
+    gsm.write(0x0A);
+    delay(1000);
+    ShowSerialData();  
+    delay(2000);
+  }
+}
+
+
+
+void ShowSerialData()
+{
+  serdata = "";
+  delay(100);
+  for(int j = 0; j<3; j++)
+  {
+    while(gsm.available()==0)
+    {
+      if (millis() - previousMillis >= 1000) 
+      {
+        Serial.println("There is no response from GSM Modem... Timeout Occured");
+        previousMillis = millis();
+        goto here;
+      }
+    }
+    serdata += gsm.readStringUntil('\n');
+    here:
+    ;
+  }
+  Serial.println(serdata);
+}
+
+void ShowSerialussd()
+{
+  serdata = "";
+  delay(5000);
+  for(int j = 0; j<6; j++)
+  {
+    while(gsm.available()==0)
+    {
+      if (millis() - previousMillis >= 5000) 
+      {
+        Serial.println("There is no response from GSM Modem... Timeout Occured");
+        previousMillis = millis();
+        goto here;
+      }
+    }
+    serdata += gsm.readStringUntil('\n');
+    here:
+    ;
+  }
+  Serial.println(serdata);
+}
+
+
+
+
+//void ShowSerialData()
+//{
+//  serdata = "";
+//  delay(100);
+//  for (int j = 0; j < 15; j++)
+//  {
+////    Serial.print("gsm Available : ");
+////      Serial.println(gsm.available());
+//      while(gsm.available()<1)
+//      {
+////        Serial.println("First Loop");
+//        if (millis() - previousMillis >= 10000) 
+//        {
+//          Serial.println("There is no response from GSM Modem... Timeout Occured");
+//          previousMillis = millis();
+//          goto here;
+//        }
+//        return;
+//      }
+//        serdata += gsm.readStringUntil('\n');
+//  }
+////  Serial.print("serdata : ");
+//  Serial.println(serdata);
+//  here:
+//  gsm.flush();
+//}
+
+
+
+
+//void ShowSerialData()
+//{
+//  serdata = "";
+//  delay(100);
+//  for (int j = 0; j < 50; j++)
+//  {
+////    Serial.print("gsm Available : ");
+////      Serial.println(gsm.available());
+//      while(gsm.available() != 0)
+//      {
+//        serdata += gsm.readStringUntil('\n');
+////        Serial.println("Inside Loop");
+//      }
+//      delay(50);
+//  }
+////  Serial.print("serdata : ");
+//  Serial.println(serdata);
+//  gsm.flush();
+//}
+
+
+//void ShowSerialData()
+//{
+//  serdata="";
+//  while(gsm.available()!=0)
+//    serdata +=char(gsm.read());
+//    //Serial.println(serdata);
+//}
+
+
+//void ShowSerialData()
+//{
+//  while(gsm.available()!=0)
+//    Serial.write(gsm.read());
+//}
+
+
+//For normal On Off Pumpsets
+void Run()
+{
+     i=digitalRead(Device);
+     Serial.println("Device"+i);
+     if(m==1 && !i)
+    {
+      digitalWrite(Device,HIGH);
+      
+   }
+    if(m==0 && i)
+    {
+       digitalWrite(Device,LOW);
+    }
+
+   if(MOTORTYPE)
+   {
+    onRelay();
+    offRelay();
+    }
+    else
+    {
+      Start();
+      Stop();
+    }
+//  if(m==1){ 
+//    drycount=0;
+//    DryRunCheck();
+//} 
+}
+
+//For Starter Type Pumps
+
+
+
+
+
+
+char* string2char(String command)
+{
+    if(command.length()!=0)
+    {
+        char *p = const_cast<char*>(command.c_str());
+        return p;
+    }
+}
+
+
+void WriteStrEEPROM(int beginaddress, String string)
+{
+  char  charBuf[string.length()+1];
+  string.toCharArray(charBuf, string.length()+1);
+  for (int t=0; t<sizeof(charBuf); t++)
+  {
+      EEPROM.write((beginaddress+t), charBuf[t]);
+      Serial.print(beginaddress+t+":");
+      Serial.println(charBuf[t]);
+  }
+  EEPROM.commit();
+}
+
+void successMessage() {
+  server.send(200, "text/plain", API_response);
+  Serial.print("success");
+}
+
+void callback(char* topic, byte* message, unsigned int length) {
+  Serial.print("Message arrived on topic: ");
+  Serial.print(topic);
+  Serial.print(". Message: ");
+  String messageTemp;
+ 
+  for (int i = 0; i < length; i++) {
+    Serial.print((char)message[i]);
+    messageTemp += (char)message[i];
+  }
+  Serial.println();
+  Serial.println(messageTemp);
+  // Feel free to add more if statements to control more GPIOs with MQTT
+
+  // If a message is received on the topic esp32/output, you check if the message is either "on" or "off".
+  // Changes the output state according to the message
+  if (String(topic) == "ajlon/output") {
+    Serial.print("Changing output to ");
+    if (messageTemp == "on") {
+      Serial.println("on");
+            digitalWrite(buzzer, HIGH);
+    }
+    else if (messageTemp == "off") {
+      Serial.println("off");
+            digitalWrite(buzzer, LOW);
+    }
+  }
+}
+
+void reconnect() {
+  // Loop until we're reconnected
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    // Attempt to connect
+    if (client.connect("espClient")) {
+      Serial.println("connected");
+      // Subscribe
+      client.subscribe("esp32/output");
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+  }
+}
+
+
+//Function that prints the reason by which ESP32 has been awaken from sleep
+void print_wakeup_reason() {
+  esp_sleep_wakeup_cause_t wakeup_reason;
+  wakeup_reason = esp_sleep_get_wakeup_cause();
+  switch (wakeup_reason)
+  {
+    case 1  : Serial.println("Wakeup caused by external signal using RTC_IO"); break;
+    case 2  : Serial.println("Wakeup caused by external signal using RTC_CNTL"); break;
+    case 3  : Serial.println("Wakeup caused by timer"); break;
+    case 4  : Serial.println("Wakeup caused by touchpad"); break;
+    case 5  : Serial.println("Wakeup caused by ULP program"); break;
+    default : Serial.println("Wakeup was not caused by deep sleep"); break;
+  }
+}
